@@ -62,13 +62,15 @@ inline static bool operator ==(const snd_seq_addr_t &a, const snd_seq_addr_t &b)
 static std::string getClientName(snd_seq_addr_t addr)
 {
 	snd_seq_client_info_t *clientInfo;
-	snd_seq_client_info_alloca(&clientInfo);
+	snd_seq_client_info_malloc(&clientInfo);
 	if (snd_seq_get_any_client_info(g_seq, addr.client, clientInfo) < 0)
 		return "";
 
 	const char *name = snd_seq_client_info_get_name(clientInfo);
+        std::string ret_name = name ? name : "";
+	snd_seq_client_info_free(clientInfo);
 
-	return name ? name : "";
+	return ret_name;
 }
 
 class ConnectionRules
@@ -334,10 +336,11 @@ static void connect(snd_seq_addr_t output, snd_seq_addr_t input)
 	printf("Connecting %d:%d to %d:%d\n", output.client, output.port, input.client, input.port);
 
 	snd_seq_port_subscribe_t *subs;
-	snd_seq_port_subscribe_alloca(&subs);
+	snd_seq_port_subscribe_malloc(&subs);
 	snd_seq_port_subscribe_set_sender(subs, &output);
 	snd_seq_port_subscribe_set_dest(subs, &input);
 	snd_seq_subscribe_port(g_seq, subs);
+	snd_seq_port_subscribe_free(subs);
 }
 
 static PortDir portGetDir(const snd_seq_port_info_t &portInfo)
@@ -386,14 +389,18 @@ static bool portAdd(const snd_seq_port_info_t &portInfo)
 		return false;
 
 	snd_seq_client_info_t *clientInfo;
-	snd_seq_client_info_alloca(&clientInfo);
-	if (snd_seq_get_any_client_info(g_seq, clientId, clientInfo) < 0)
+	snd_seq_client_info_malloc(&clientInfo);
+	if (snd_seq_get_any_client_info(g_seq, clientId, clientInfo) < 0) {
+	        snd_seq_client_info_free(clientInfo);
 		return false;
+        }
 
 	// Ignore through ports.
 	const char *name = snd_seq_client_info_get_name(clientInfo);
-	if (!name || strncmp(name, "Midi Through", 12) == 0)
+	if (!name || strncmp(name, "Midi Through", 12) == 0) {
+	        snd_seq_client_info_free(clientInfo);
 		return false;
+        }
 
 	PortType type = portGetType(portInfo);
 	clients_t &list = (type == TYPE_SOFTWARE) ? g_swClients : g_hwClients;
@@ -422,6 +429,7 @@ static bool portAdd(const snd_seq_port_info_t &portInfo)
 		}
 	}
 
+        snd_seq_client_info_free(clientInfo);
 	return gotAdded;
 }
 
@@ -525,13 +533,13 @@ static void portsConnectAll(const clients_t &listA, const clients_t &listB, Conn
 	}
 }
 
-static int portsInit()
+static void portsInit()
 {
 	snd_seq_client_info_t *clientInfo;
 	snd_seq_port_info_t *portInfo;
 
-	snd_seq_client_info_alloca(&clientInfo);
-	snd_seq_port_info_alloca(&portInfo);
+	snd_seq_client_info_malloc(&clientInfo);
+	snd_seq_port_info_malloc(&portInfo);
 	snd_seq_client_info_set_client(clientInfo, -1);
 	while (snd_seq_query_next_client(g_seq, clientInfo) >= 0)
 	{
@@ -550,6 +558,8 @@ static int portsInit()
 	portsConnectAll(g_hwClients, g_swClients, ConnectionRules::STRENGTH_VERY_VAGUE);
 	portsConnectAll(g_hwClients, g_hwClients, ConnectionRules::STRENGTH_SPECIFIC);
 	portsConnectAll(g_swClients, g_swClients, ConnectionRules::STRENGTH_SPECIFIC);
+	snd_seq_client_info_free(clientInfo);
+	snd_seq_port_info_free(portInfo);
 }
 
 static void seqUninit()
@@ -619,7 +629,7 @@ error:
 	return result;
 }
 
-static bool handleSeqEvent(snd_seq_t *seq, int port)
+static bool handleSeqEvent(snd_seq_t *seq)
 {
 	do
 	{
@@ -633,7 +643,7 @@ static bool handleSeqEvent(snd_seq_t *seq, int port)
 				printf("%d:%d port appeared.\n", ev->data.addr.client, ev->data.addr.port);
 
 				snd_seq_port_info_t *portInfo;
-				snd_seq_port_info_alloca(&portInfo);
+				snd_seq_port_info_malloc(&portInfo);
 
 				int result = snd_seq_get_any_port_info(g_seq, ev->data.addr.client, ev->data.addr.port, portInfo);
 				if (result >= 0)
@@ -645,6 +655,7 @@ static bool handleSeqEvent(snd_seq_t *seq, int port)
 				{
 					fprintf(stderr, "Failed getting port %d:%d info: %d\n", ev->data.addr.client, ev->data.addr.port, result);
 				}
+                                snd_seq_port_info_free(portInfo);
 			}
 			break;
 		case SND_SEQ_EVENT_PORT_EXIT:
@@ -658,6 +669,7 @@ static bool handleSeqEvent(snd_seq_t *seq, int port)
 
 		snd_seq_free_event(ev);
 	} while (snd_seq_event_input_pending(seq, 0) > 0);
+
 
 	return false;
 }
@@ -698,7 +710,7 @@ static int run()
 		if (fds[0].revents)
 		{
 			--n;
-			done = handleSeqEvent(g_seq, g_port);
+			done = handleSeqEvent(g_seq);
 		}
 
 		assert(n == 0);
@@ -842,6 +854,9 @@ static int parseRuleFile(ConnectionRules &rules, const char *fileName)
 		case DIR_OUTPUT:
 			rules.addRule(type, left, right);
 			break;
+                case DIR_UNKNOWN:
+                        break;
+
 		}
 	}
 
@@ -890,7 +905,7 @@ int main(int argc, char **argv, char **envp)
 
 	if (!g_rules.hasRules())
 	{
-		printf("Using default 'allow all' rule.\n", result);
+		printf("Using default 'allow all' rule.\n");
 		g_rules.addRule(ConnectionRules::TYPE_ALLOW, "*", "*");
 	}
 
