@@ -1,0 +1,36 @@
+amidiauto
+=========
+
+amidiauto is a program that monitors for available MIDI devices and
+automatically connect appropriate inputs to outputs. For example, if
+you could run a sound synthesizer and plug in a MIDI keyboard the two
+will be automatically connected, allowing you to instantly control the
+synthesizer with the keyboard.
+
+Install binary package for Raspbian buster
+------------------------------------------
+
+  wget https://github.com/antiprism/amidiauto/releases/download/v1.01Raspbian/amidiauto-1.01_buster.deb
+  sudo apt install ./amidiauto-1.01_buster.deb 
+
+Build from source and install
+-----------------------------
+
+  make
+  sudo make install
+
+Documentation
+-------------
+
+The amidiauto documentation is at
+
+   https://blokas.io/patchbox-os/docs/amidiauto/
+
+About
+-----
+
+This repository is a fork of
+
+   https://github.com/BlokasLabs/amidiauto
+
+It has been updated to build and install on Raspbian.
